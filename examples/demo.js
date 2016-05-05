@@ -5,8 +5,8 @@ var app = angular.module('demo', ['ngSanitize', 'ui.select']);
 /**
  * AngularJS default filter with the following expression:
  * "person in people | filter: {name: $select.search, age: $select.search}"
- * performs a AND between 'name: $select.search' and 'age: $select.search'.
- * We want to perform a OR.
+ * performs an AND between 'name: $select.search' and 'age: $select.search'.
+ * We want to perform an OR.
  */
 app.filter('propsFilter', function() {
   return function(items, props) {
@@ -107,7 +107,7 @@ app.controller('DemoCtrl', function($scope, $http, $timeout, $interval) {
   },3000);
 
   $scope.counter = 0;
-  $scope.someFunction = function (item, model){
+  $scope.onSelectCallback = function (item, model){
     $scope.counter++;
     $scope.eventResult = {item: item, model: model};
   };

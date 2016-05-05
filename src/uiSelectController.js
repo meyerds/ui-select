@@ -5,8 +5,8 @@
  * put as much logic in the controller (instead of the link functions) as possible so it can be easily tested.
  */
 uis.controller('uiSelectCtrl',
-  ['$scope', '$element', '$timeout', '$filter', 'uisRepeatParser', 'uiSelectMinErr', 'uiSelectConfig', '$parse',
-  function($scope, $element, $timeout, $filter, RepeatParser, uiSelectMinErr, uiSelectConfig, $parse) {
+  ['$scope', '$element', '$timeout', '$filter', 'uisRepeatParser', 'uiSelectMinErr', 'uiSelectConfig', '$parse', '$injector', '$window',
+  function($scope, $element, $timeout, $filter, RepeatParser, uiSelectMinErr, uiSelectConfig, $parse, $injector, $window) {
 
   var ctrl = this;
 
@@ -16,9 +16,11 @@ uis.controller('uiSelectCtrl',
   ctrl.searchEnabled = uiSelectConfig.searchEnabled;
   ctrl.sortable = uiSelectConfig.sortable;
   ctrl.refreshDelay = uiSelectConfig.refreshDelay;
+  ctrl.paste = uiSelectConfig.paste;
 
   ctrl.removeSelected = false; //If selected item(s) should be removed from dropdown list
   ctrl.closeOnSelect = true; //Initialized inside uiSelect directive link function
+  ctrl.skipFocusser = false; //Set to true to avoid returning focus to ctrl when item is selected
   ctrl.search = EMPTY_SEARCH;
 
   ctrl.activeIndex = 0; //Dropdown of choices
@@ -41,14 +43,42 @@ uis.controller('uiSelectCtrl',
   ctrl.clickTriggeredSelect = false;
   ctrl.$filter = $filter;
 
+  // Use $injector to check for $animate and store a reference to it
+  ctrl.$animate = (function () {
+    try {
+      return $injector.get('$animate');
+    } catch (err) {
+      // $animate does not exist
+      return null;
+    }
+  })();
+
   ctrl.searchInput = $element.querySelectorAll('input.ui-select-search');
   if (ctrl.searchInput.length !== 1) {
     throw uiSelectMinErr('searchInput', "Expected 1 input.ui-select-search but got '{0}'.", ctrl.searchInput.length);
   }
-  
+
   ctrl.isEmpty = function() {
-    return angular.isUndefined(ctrl.selected) || ctrl.selected === null || ctrl.selected === '';
+    return angular.isUndefined(ctrl.selected) || ctrl.selected === null || ctrl.selected === '' || (ctrl.multiple && ctrl.selected.length === 0);
   };
+
+  function _findIndex(collection, predicate, thisArg){
+    if (collection.findIndex){
+      return collection.findIndex(predicate, thisArg);
+    } else {
+      var list = Object(collection);
+      var length = list.length >>> 0;
+      var value;
+
+      for (var i = 0; i < length; i++) {
+        value = list[i];
+        if (predicate.call(thisArg, value, i, list)) {
+          return i;
+        }
+      }
+      return -1;
+    }
+  }
 
   // Most of the time the user does not want to empty the search input when in typeahead mode
   function _resetSearchInput() {
@@ -56,7 +86,9 @@ uis.controller('uiSelectCtrl',
       ctrl.search = EMPTY_SEARCH;
       //reset activeIndex
       if (ctrl.selected && ctrl.items.length && !ctrl.multiple) {
-        ctrl.activeIndex = ctrl.items.indexOf(ctrl.selected);
+        ctrl.activeIndex = _findIndex(ctrl.items, function(item){
+          return angular.equals(this, item);
+        }, ctrl.selected);
       }
     }
   }
@@ -90,15 +122,30 @@ uis.controller('uiSelectCtrl',
         ctrl.activeIndex = 0;
       }
 
-      // Give it time to appear before focus
-      $timeout(function() {
-        ctrl.search = initSearchValue || ctrl.search;
-        ctrl.searchInput[0].focus();
-        if(!ctrl.tagging.isActivated && ctrl.items.length > 1) {
-          _ensureHighlightVisible();
-        }
-      });
+      var container = $element.querySelectorAll('.ui-select-choices-content');
+      if (ctrl.$animate && ctrl.$animate.on && ctrl.$animate.enabled(container[0])) {
+        ctrl.$animate.on('enter', container[0], function (elem, phase) {
+          if (phase === 'close') {
+            // Only focus input after the animation has finished
+            $timeout(function () {
+              ctrl.focusSearchInput(initSearchValue);
+            });
+          }
+        });
+      } else {
+        $timeout(function () {
+          ctrl.focusSearchInput(initSearchValue);
+          if(!ctrl.tagging.isActivated && ctrl.items.length > 1) {
+            _ensureHighlightVisible();
+          }
+        });
+      }
     }
+  };
+
+  ctrl.focusSearchInput = function (initSearchValue) {
+    ctrl.search = initSearchValue || ctrl.search;
+    ctrl.searchInput[0].focus();
   };
 
   ctrl.findGroupByName = function(name) {
@@ -149,7 +196,7 @@ uis.controller('uiSelectCtrl',
     //If collection is an Object, convert it to Array
 
     var originalSource = ctrl.parserResult.source;
-    
+
     //When an object is used as source, we better create an array and use it as 'source'
     var createArrayFromObject = function(){
       var origSrc = originalSource($scope);
@@ -177,7 +224,11 @@ uis.controller('uiSelectCtrl',
         ctrl.setItemsFn(data);
       }else{
         if ( data !== undefined ) {
-          var filteredItems = data.filter(function(i) {return selectedItems && selectedItems.indexOf(i) < 0;});
+          var filteredItems = data.filter(function(i) {
+            return selectedItems.every(function(selectedItem) {
+              return !angular.equals(i, selectedItem);
+            });
+          });
           ctrl.setItemsFn(filteredItems);
         }
       }
@@ -195,7 +246,7 @@ uis.controller('uiSelectCtrl',
         ctrl.items = [];
       } else {
         if (!angular.isArray(items)) {
-          throw uiSelectMinErr('items', "Expected an array but got '{0}'.", items);          
+          throw uiSelectMinErr('items', "Expected an array but got '{0}'.", items);
         } else {
           //Remove already selected items (ex: while searching)
           //TODO Should add a test
@@ -238,7 +289,7 @@ uis.controller('uiSelectCtrl',
       return false;
     }
     var itemIndex = ctrl.items.indexOf(itemScope[ctrl.itemProperty]);
-    var isActive =  itemIndex === ctrl.activeIndex;
+    var isActive =  itemIndex == ctrl.activeIndex;
 
     if ( !isActive || ( itemIndex < 0 && ctrl.taggingLabel !== false ) ||( itemIndex < 0 && ctrl.taggingLabel === false) ) {
       return false;
@@ -273,7 +324,7 @@ uis.controller('uiSelectCtrl',
   ctrl.select = function(item, skipFocusser, $event) {
     if (item === undefined || !item._uiSelectChoiceDisabled) {
 
-      if ( ! ctrl.items && ! ctrl.search ) return;
+      if ( ! ctrl.items && ! ctrl.search && ! ctrl.tagging.isActivated) return;
 
       if (!item || !item._uiSelectChoiceDisabled) {
         if(ctrl.tagging.isActivated) {
@@ -299,7 +350,7 @@ uis.controller('uiSelectCtrl',
               // create new item on the fly if we don't already have one;
               // use tagging function if we have one
               if ( ctrl.tagging.fct !== undefined && typeof item === 'string' ) {
-                item = ctrl.tagging.fct(ctrl.search);
+                item = ctrl.tagging.fct(item);
                 if (!item) return;
               // if item type is 'string', apply the tagging label
               } else if ( typeof item === 'string' ) {
@@ -430,7 +481,7 @@ uis.controller('uiSelectCtrl',
         break;
       case KEY.ENTER:
         if(ctrl.open && (ctrl.tagging.isActivated || ctrl.activeIndex >= 0)){
-          ctrl.select(ctrl.items[ctrl.activeIndex]); // Make sure at least one dropdown item is highlighted before adding if not in tagging mode
+          ctrl.select(ctrl.items[ctrl.activeIndex], ctrl.skipFocusser); // Make sure at least one dropdown item is highlighted before adding if not in tagging mode
         } else {
           ctrl.activate(false, true); //In case its the search input in 'multiple' mode
         }
@@ -448,6 +499,11 @@ uis.controller('uiSelectCtrl',
   ctrl.searchInput.on('keydown', function(e) {
 
     var key = e.which;
+
+    if (~[KEY.ENTER,KEY.ESC].indexOf(key)){
+      e.preventDefault();
+      e.stopPropagation();
+    }
 
     // if(~[KEY.ESC,KEY.TAB].indexOf(key)){
     //   //TODO: SEGURO?
@@ -495,18 +551,38 @@ uis.controller('uiSelectCtrl',
 
   });
 
-  // If tagging try to split by tokens and add items
   ctrl.searchInput.on('paste', function (e) {
-    var data = e.originalEvent.clipboardData.getData('text/plain');
-    if (data && data.length > 0 && ctrl.taggingTokens.isActivated && ctrl.tagging.fct) {
-      var items = data.split(ctrl.taggingTokens.tokens[0]); // split by first token only
-      if (items && items.length > 0) {
-        angular.forEach(items, function (item) {
-          var newItem = ctrl.tagging.fct(item);
-          if (newItem) {
-            ctrl.select(newItem, true);
-          }
-        });
+    var data;
+
+    if (window.clipboardData && window.clipboardData.getData) { // IE
+      data = window.clipboardData.getData('Text');
+    } else {
+      data = (e.originalEvent || e).clipboardData.getData('text/plain');
+    }
+
+    // Prepend the current input field text to the paste buffer.
+    data = ctrl.search + data;
+
+    if (data && data.length > 0) {
+      // If tagging try to split by tokens and add items
+      if (ctrl.taggingTokens.isActivated) {
+        var separator = KEY.toSeparator(ctrl.taggingTokens.tokens[0]);
+        var items = data.split(separator || ctrl.taggingTokens.tokens[0]); // split by first token only
+        if (items && items.length > 0) {
+        var oldsearch = ctrl.search;
+          angular.forEach(items, function (item) {
+            var newItem = ctrl.tagging.fct ? ctrl.tagging.fct(item) : item;
+            if (newItem) {
+              ctrl.select(newItem, true);
+            }
+          });
+          ctrl.search = oldsearch || EMPTY_SEARCH;
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      } else if (ctrl.paste) {
+        ctrl.paste(data);
+        ctrl.search = EMPTY_SEARCH;
         e.preventDefault();
         e.stopPropagation();
       }
@@ -547,6 +623,10 @@ uis.controller('uiSelectCtrl',
 
   $scope.$on('$destroy', function() {
     ctrl.searchInput.off('keyup keydown tagged blur paste');
+  });
+
+  angular.element($window).bind('resize', function() {
+    ctrl.sizeSearchInput();
   });
 
 }]);
