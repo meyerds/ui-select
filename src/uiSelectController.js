@@ -284,6 +284,12 @@ uis.controller('uiSelectCtrl',
     }
   };
 
+  //Re-adding so that item is set as active on hover
+  //Without, the item is not selected properly
+  ctrl.setActiveItem = function(item) {
+    ctrl.activeIndex = ctrl.items.indexOf(item);
+  };
+
   ctrl.isActive = function(itemScope) {
     if ( !ctrl.open ) {
       return false;
