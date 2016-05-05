@@ -1,7 +1,7 @@
 /*!
  * ui-select
  * http://github.com/angular-ui/ui-select
- * Version: 0.16.0 - 2016-03-23T20:51:56.609Z
+ * Version: 0.16.1 - 2016-05-05T18:44:44.994Z
  * License: MIT
  */
 
@@ -511,7 +511,11 @@ uis.controller('uiSelectCtrl',
           //Remove already selected items (ex: while searching)
           //TODO Should add a test
           ctrl.refreshItems(items);
-          ctrl.ngModel.$modelValue = null; //Force scope model value and ngModel value to be out of sync to re-run formatters
+
+          //update the view value with fresh data from items, if there is a valid model value
+          if(angular.isDefined(ctrl.ngModel.$modelValue)) {
+            ctrl.ngModel.$modelValue = null; //Force scope model value and ngModel value to be out of sync to re-run formatters
+          }
         }
       }
     });
@@ -538,6 +542,12 @@ uis.controller('uiSelectCtrl',
         $scope.$eval(refreshAttr);
       }, ctrl.refreshDelay);
     }
+  };
+
+  //Re-adding so that item is set as active on hover
+  //Without, the item is not selected properly
+  ctrl.setActiveItem = function(item) {
+    ctrl.activeIndex = ctrl.items.indexOf(item);
   };
 
   ctrl.isActive = function(itemScope) {
@@ -1447,7 +1457,10 @@ uis.directive('uiSelectMultiple', ['uiSelectMinErr','$timeout', function(uiSelec
       //Watch for external model changes
       scope.$watchCollection(function(){ return ngModel.$modelValue; }, function(newValue, oldValue) {
         if (oldValue != newValue){
-          ngModel.$modelValue = null; //Force scope model value and ngModel value to be out of sync to re-run formatters
+          //update the view value with fresh data from items, if there is a valid model value
+          if(angular.isDefined(ngModel.$modelValue)) {
+            ngModel.$modelValue = null; //Force scope model value and ngModel value to be out of sync to re-run formatters
+          }
           $selectMultiple.refreshComponent();
         }
       });
